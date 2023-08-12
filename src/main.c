@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
 			if (confirm_delete_vars()) {
 				delete_vars(argv[0]);
 			}
-			return 0;
+			return SUCCESS;
 			break;
 		case ALREADY_INSTALLED:
 			os_PutStrFull("Already installed.");
