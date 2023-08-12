@@ -162,12 +162,12 @@ port_new:
 	ret
 
 port_read:
-	push	de,bc,hl
+	push	ix,de,bc,hl
 	call	port_old.read
 	jq	_port_lock.pop
 
 port_write:
-	push	de,bc,hl
+	push	ix,de,bc,hl
 	call	port_old.write
 	jq	_port_lock.pop
 
