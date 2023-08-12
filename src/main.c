@@ -97,7 +97,6 @@ int main(int argc, char **argv) {
 			os_PutStrFull("Delete app from the");
 			os_NewLine();
 			os_PutStrFull("mem menu to reinstall.");
-			// delete_vars(argv[0]);
 			break;
 		case MISSING_VAR:
 			os_PutStrFull("Install failed.");
