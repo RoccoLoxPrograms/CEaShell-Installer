@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
 			os_PutStrFull("Successfully installed.");
 			os_NewLine();
 			os_NewLine();
-			os_PutStrFull("Delete installer?");
+			os_PutStrFull("Delete installer files?");
 			if (confirm_delete_vars()) {
 				delete_vars(argv[0]);
 			}
