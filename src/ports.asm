@@ -161,16 +161,6 @@ port_new:
 	out0	($22),a
 	ret
 
-port_read:
-	push	de,bc,hl
-	call	port_old.read
-	jq	_port_lock.pop
-
-port_write:
-	push	de,bc,hl
-	call	port_old.write
-	jq	_port_lock.pop
-
 _port_unlock:
 	push	ix,de,bc,hl
 	call	0
