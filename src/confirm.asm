@@ -7,8 +7,6 @@ _confirm_delete_vars:
     ld iy, ti.flags
     ld a, 4
     ld (ti.curRow), a
-    ld hl, $FFFF
-    ld.sis (ti.fillRectColor and $FFFF), hl
     res ti.textInverse, (iy + ti.textFlags)
 
 .update_display:
@@ -16,7 +14,7 @@ _confirm_delete_vars:
     ld de, 241
     ld b, 117
     ld c, 134
-    call ti.FillRect
+    call ti.ClearRect
     ld hl, 6
     ld.sis (ti.curCol and $FFFF), hl
     ld hl, option_yes
