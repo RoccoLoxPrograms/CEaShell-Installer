@@ -43,6 +43,7 @@ _confirm_delete_vars:
     ret z
 
 .exit:
+    res ti.textInverse, (iy + ti.textFlags)
     xor a, a
     ret
 
