@@ -9,10 +9,6 @@ max_appvars = 24
 assume adl = 1
 section .text
 
-_appvar_name:
-	db	'{VARNME}',0
-
-
 _install:
 	push	ix
 ;	call	open_debugger
@@ -45,8 +41,8 @@ _app_size = $-3
 	xor	a,a
 	ld	h,a
 	ld	l,a
-	ld	bc,$10000
-	sbc	hl,bc
+	;ld	bc,$10000
+	;sbc	hl,bc
 	ld	a,(hl)
 	cp	a,$ff
 	ld	a,4 ; NO_SPACE
@@ -157,6 +153,5 @@ _install_loc:
 	public	_app_size
 	public	_code_offset
 	public	_install_loc
-	public	_appvar_name
 	extern	_port_unlock
 	extern	_port_lock
