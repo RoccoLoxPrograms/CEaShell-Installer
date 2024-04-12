@@ -5,6 +5,7 @@
 #include <string.h>
 #include <ti/screen.h>
 #include <ti/getcsc.h>
+#include <ti/info.h>
 
 // pretty sure you'll run out of flash past this point, lol
 #define MAX_APPVARS 24
@@ -72,50 +73,104 @@ void delete_vars(const char *prgmname) {
 }
 
 int main(int argc, char **argv) {
-	os_SetCursorPos(0, 0);
+	const system_info_t *system_info = os_GetSystemInfo();
+	bool french = false;
+	if (system_info->language == 0x10C) {
+		french = true;
+	}
+	os_HomeUp();
 	os_ClrLCDFull();
-	os_PutStrFull("Installing app");
-	os_NewLine();
-	os_PutStrFull("Please wait...");
+	if (!french) {
+		os_PutStrFull("Installing app.");
+		os_NewLine();
+		os_PutStrFull("Please wait...");
+	} else {
+		os_PutStrFull("Installation de");
+		os_NewLine();
+		os_PutStrFull("l'application.");
+		os_NewLine();
+		os_PutStrFull("Veuillez patienter...");
+	}
 	uint8_t error = try_install();
-	os_SetCursorPos(0, 0);
+	os_HomeUp();
 	os_ClrLCDFull();
 	switch (error) {
 		case SUCCESS:
-			os_PutStrFull("Successfully installed.");
-			os_NewLine();
-			os_NewLine();
-			os_PutStrFull("Delete installer files?");
+			if (!french) {
+				os_PutStrFull("Successfully installed.");
+				os_NewLine();
+				os_NewLine();
+				os_PutStrFull("Delete installer files?");
+			} else {
+				os_PutStrFull("Install""\x96"" avec succ""\x97""s.");
+				os_NewLine();
+				os_NewLine();
+				os_PutStrFull("Supprimer l'installeur ?");
+			}
 			if (confirm_delete_vars()) {
 				delete_vars(argv[0]);
 			}
 			return SUCCESS;
 			break;
 		case ALREADY_INSTALLED:
-			os_PutStrFull("Already installed.");
-			os_NewLine();
-			os_PutStrFull("Delete app from the");
-			os_NewLine();
-			os_PutStrFull("mem menu to reinstall.");
+			if (!french) {
+				os_PutStrFull("Already installed.");
+				os_NewLine();
+				os_PutStrFull("Delete app from the");
+				os_NewLine();
+				os_PutStrFull("mem menu to reinstall.");
+			} else {
+				os_PutStrFull("D""\x96""j""\x8F"" install""\x96"".");
+				os_NewLine();
+				os_PutStrFull("Supprimez l'appli depuis");
+				os_NewLine();
+				os_PutStrFull("le menu m""\x96""m pour");
+				os_NewLine();
+				os_PutStrFull("reinstaller.");
+			}
 			break;
 		case MISSING_VAR:
-			os_PutStrFull("Install failed.");
-			os_NewLine();
-			os_PutStrFull("Missing an appvar.");
+			if (!french) {
+				os_PutStrFull("Install failed.");
+				os_NewLine();
+				os_PutStrFull("Missing an appvar.");
+			} else {
+				os_PutStrFull("Echec de l'installation.");
+				os_NewLine();
+				os_PutStrFull("Appvar manquante.");
+			}
 			break;
 		case PORT_SETUP_FAILED:
-			os_PutStrFull("Install failed.");
-			os_NewLine();
-			os_PutStrFull("Unsupported OS version.");
+			if (!french) {
+				os_PutStrFull("Install failed.");
+				os_NewLine();
+				os_PutStrFull("Unsupported OS version.");
+			} else {
+				os_PutStrFull("Echec de l'installation.");
+				os_NewLine();
+				os_PutStrFull("Version de l'OS");
+				os_NewLine();
+				os_PutStrFull("incompatible.");
+			}
 			break;
 		case NO_SPACE:
-			os_PutStrFull("Install failed.");
-			os_NewLine();
-			os_PutStrFull("Out of archive space.");
-			os_NewLine();
-			os_PutStrFull("Try running the");
-			os_NewLine();
-			os_PutStrFull("GarbageCollect command.");
+			if (!french) {
+				os_PutStrFull("Install failed.");
+				os_NewLine();
+				os_PutStrFull("Out of archive space.");
+				os_NewLine();
+				os_PutStrFull("Try running the");
+				os_NewLine();
+				os_PutStrFull("GarbageCollect command.");
+			} else {
+				os_PutStrFull("Echec de l'installation.");
+				os_NewLine();
+				os_PutStrFull("M""\x96""moire insuffisante.");
+				os_NewLine();
+				os_PutStrFull("Essayez de lancer la");
+				os_NewLine();
+				os_PutStrFull("commande \"RamasseMiettes\".");
+			}
 			break;
 	}
 	while (os_GetCSC());

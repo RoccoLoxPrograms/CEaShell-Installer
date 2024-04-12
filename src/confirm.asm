@@ -11,20 +11,32 @@ _confirm_delete_vars:
 
 .update_display:
     ld hl, 72
-    ld de, 241
+    ld de, 253
     ld b, 117
     ld c, 134
     call ti.ClearRect
     ld hl, 6
     ld.sis (ti.curCol and $FFFF), hl
+    ld.sis hl, (ti.localLanguage)
+    ld de, $010C
+    or a, a
+    sbc hl, de
     ld hl, option_yes
+    jr nz, $ + 6
+    ld hl, option_yes_fr
     call ti.PutS
     ld hl, 16
     ld.sis (ti.curCol and $FFFF), hl
     ld a, (iy + ti.textFlags)
     xor a, 8
     ld (iy + ti.textFlags), a
+    ld.sis hl, (ti.localLanguage)
+    ld de, $010C
+    or a, a
+    sbc hl, de
     ld hl, option_no
+    jr nz, $ + 6
+    ld hl, option_no_fr
     call ti.PutS
 
 .get_key:
@@ -52,5 +64,11 @@ option_yes:
 
 option_no:
     db " No ", 0
+
+option_yes_fr:
+    db " Oui ", 0
+
+option_no_fr:
+    db " Non ", 0
 
 public _confirm_delete_vars
