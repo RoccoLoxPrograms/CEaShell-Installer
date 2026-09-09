@@ -1,179 +1,394 @@
-#include <debug.h>
-#include <fileioc.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+
+#include <debug.h>
+#include <ti/vars.h>
 #include <ti/screen.h>
 #include <ti/getcsc.h>
 #include <ti/info.h>
 
-// pretty sure you'll run out of flash past this point, lol
-#define MAX_APPVARS 24
-#define APPVAR_SIZE 60000
+#include "app.h"
+#include "flash.h"
+#include "ports.h"
 
-#define MAIN_SECTION_OFFSET 0x112
+#define MAX_APPVARS 99
 
-extern struct {
-	void *data;
-	size_t size;
-} locations[MAX_APPVARS];
-
-extern uint8_t num_appvars;
-extern size_t app_size;
-extern uint24_t code_offset;
-extern void *install_loc;
-
-enum error {
-	SUCCESS,
-	ALREADY_INSTALLED,
-	MISSING_VAR,
-	PORT_SETUP_FAILED,
-	NO_SPACE,
+enum
+{
+    SUCCESS,
+    ALREADY_INSTALLED,
+    MISSING_VAR,
+    PORT_SETUP_FAILED,
+    NO_SPACE,
 };
 
-uint8_t install();
-bool port_setup();
-bool confirm_delete_vars();
+struct appvar
+{
+    uint8_t *data;
+    uint24_t size;
+    uintptr_t app_offset;
+};
 
-uint8_t try_install() {
-	for (uint8_t i = 0; i < MAX_APPVARS; i++) {
-		char filename[] = "AppInstA";
-		filename[7] = 'A' + i;
-		ti_var_t f = ti_Open(filename, "r");
-		if (!f) {
-			dbg_printf(dbgerr, "Appvar %s not found.\n", filename);
-			return MISSING_VAR;
-		}
-		locations[i].data = ti_GetDataPtr(f);
-		size_t size = ti_GetSize(f);
-		locations[i].size = size;
-		app_size += size;
-		num_appvars++;
-		ti_Close(f);
-		if (size != APPVAR_SIZE) break;
-	}
-	code_offset = *(uint24_t*)(locations[0].data + MAIN_SECTION_OFFSET) + 0x100;
-	if (port_setup()) {
-		dbg_printf(dbgerr, "Failed to set up ports.\n");
-		return PORT_SETUP_FAILED;
-	}
-	uint8_t err = install();
-	dbg_printf("Installed to %p\n", install_loc);
-	dbg_printf("Execution start: %p\n", install_loc + 0x100 + *(uint24_t*)(install_loc + 0x11B));
-	return err;
+static struct appvar appvars[MAX_APPVARS];
+static char app_name[10];
+bool french = false;
+
+static bool check_variable_overlaps(const uint8_t *app_start)
+{
+    uint8_t first_erased_page = ADDR_TO_PAGE(app_start) - 1;
+
+    void *entry = os_GetSymTablePtr();
+    uint24_t type;
+    uint24_t length;
+    char name[9];
+    void *data;
+
+    while ((entry = os_NextSymEntry(entry, &type, &length, name, &data)) != NULL)
+    {
+        if (data >= (void*)os_RamStart)
+        {
+            continue;
+        }
+
+        const uint8_t page = ADDR_TO_PAGE(data);
+        if (page < first_erased_page)
+        {
+            continue;
+        }
+
+        bool ours = false;
+        for (uint8_t i = 0; i < MAX_APPVARS; ++i)
+        {
+            char appvar_name[10];
+
+            sprintf(appvar_name, APPVAR_PREFIX "%u", i);
+
+            if (strncmp(name, appvar_name, length) == 0)
+            {
+                const uint24_t addr = (uintptr_t)app_start + (APPVAR_SPLIT_SIZE * i);
+
+                if (page >= ADDR_TO_PAGE(addr))
+                {
+                    dbg_printf("Variable %s (page 0x%x) would be erased before being copied to 0x%x\n",
+                        name, page, addr);
+
+                    return false;
+                }
+                ours = true;
+                break; 
+            }
+        }
+
+        if (!ours)
+        {
+            dbg_printf("Non-installer variable %s @ %p overlaps app\n", name, data);
+            return false;
+        }
+    }
+
+    return true;
 }
 
-void delete_vars(const char *prgmname) {
-	for (uint8_t i = 0; i < num_appvars; i++) {
-		char filename[] = "AppInstA";
-		filename[7] = 'A' + i;
-		ti_Delete(filename);
-	}
-	ti_DeleteVar(prgmname, OS_TYPE_PROT_PRGM);
+static void *pmax(void *a, void *b)
+{
+    return a > b ? a : b;
 }
 
-int main(int argc, char **argv) {
-	const system_info_t *system_info = os_GetSystemInfo();
-	bool french = false;
-	if (system_info->language == 0x10C) {
-		french = true;
-	}
-	os_HomeUp();
-	os_ClrLCDFull();
-	if (!french) {
-		os_PutStrFull("Installing app.");
-		os_NewLine();
-		os_PutStrFull("Please wait...");
-	} else {
-		os_PutStrFull("Installation de");
-		os_NewLine();
-		os_PutStrFull("l'application.");
-		os_NewLine();
-		os_PutStrFull("Veuillez patienter...");
-	}
-	uint8_t error = try_install();
-	os_HomeUp();
-	os_ClrLCDFull();
-	switch (error) {
-		case SUCCESS:
-			if (!french) {
-				os_PutStrFull("Successfully installed.");
-				os_NewLine();
-				os_NewLine();
-				os_PutStrFull("Delete installer files?");
-			} else {
-				os_PutStrFull("Install""\x96"" avec succ""\x97""s.");
-				os_NewLine();
-				os_NewLine();
-				os_PutStrFull("Supprimer l'installeur ?");
-			}
-			if (confirm_delete_vars()) {
-				delete_vars(argv[0]);
-			}
-			return SUCCESS;
-			break;
-		case ALREADY_INSTALLED:
-			if (!french) {
-				os_PutStrFull("Already installed.");
-				os_NewLine();
-				os_PutStrFull("Delete app from the");
-				os_NewLine();
-				os_PutStrFull("mem menu to reinstall.");
-			} else {
-				os_PutStrFull("D""\x96""j""\x8F"" install""\x96"".");
-				os_NewLine();
-				os_PutStrFull("Supprimez l'appli depuis");
-				os_NewLine();
-				os_PutStrFull("le menu m""\x96""m pour");
-				os_NewLine();
-				os_PutStrFull("reinstaller.");
-			}
-			break;
-		case MISSING_VAR:
-			if (!french) {
-				os_PutStrFull("Install failed.");
-				os_NewLine();
-				os_PutStrFull("Missing an appvar.");
-			} else {
-				os_PutStrFull("Echec de l'installation.");
-				os_NewLine();
-				os_PutStrFull("Appvar manquante.");
-			}
-			break;
-		case PORT_SETUP_FAILED:
-			if (!french) {
-				os_PutStrFull("Install failed.");
-				os_NewLine();
-				os_PutStrFull("Unsupported OS version.");
-			} else {
-				os_PutStrFull("Echec de l'installation.");
-				os_NewLine();
-				os_PutStrFull("Version de l'OS");
-				os_NewLine();
-				os_PutStrFull("incompatible.");
-			}
-			break;
-		case NO_SPACE:
-			if (!french) {
-				os_PutStrFull("Install failed.");
-				os_NewLine();
-				os_PutStrFull("Out of archive space.");
-				os_NewLine();
-				os_PutStrFull("Try running the");
-				os_NewLine();
-				os_PutStrFull("GarbageCollect command.");
-			} else {
-				os_PutStrFull("Echec de l'installation.");
-				os_NewLine();
-				os_PutStrFull("M""\x96""moire insuffisante.");
-				os_NewLine();
-				os_PutStrFull("Essayez de lancer la");
-				os_NewLine();
-				os_PutStrFull("commande \"RamasseMiettes\".");
-			}
-			break;
-	}
-	while (os_GetCSC());
-	while (!os_GetCSC());
-	return error;
+static void *pmin(void *a, void *b)
+{
+    return a < b ? a : b;
+}
+
+static int install(void)
+{
+    uint24_t app_size = 0;
+
+    if (port_setup())
+    {
+        return PORT_SETUP_FAILED;
+    }
+
+    struct appvar *appvar = &appvars[0];
+    for (uint8_t i = 0; i < MAX_APPVARS; ++i)
+    {
+        char name[10];
+        void *data;
+        const int namelen = sprintf(name, APPVAR_PREFIX "%u", i);
+
+        if (os_ChkFindSym(OS_TYPE_APPVAR, name, NULL, &data))
+        {
+            uint8_t *d = data;
+
+            if (d < os_RamStart)
+            {
+                d += 10 + namelen;
+            }
+        
+            appvar->size = *(uint16_t*)d;
+            appvar->data = d + 2;
+            appvar->app_offset = app_size;
+
+            /* first appvar contains app name */
+            if (i == 0)
+            {
+                strncpy(app_name, (const char *)(appvar->data + 256 + 3), sizeof app_name);
+
+                dbg_printf("App %s\n", app_name);
+
+                if (os_FindAppStart(app_name))
+                {
+                    return ALREADY_INSTALLED;
+                }
+            }
+
+            dbg_printf("AppVar %u (%s, %u bytes)\n", i, name, (uint24_t)appvar->size);
+
+            app_size += appvar->size;
+
+            if (appvar->size != APPVAR_SPLIT_SIZE)
+            {
+                break;
+            }
+
+            appvar++;
+        }
+        else
+        {
+            return MISSING_VAR;
+        }
+    }
+
+    /* size at end of application stored in flash */
+    appvar->size += sizeof(uint24_t);
+
+    uint8_t *app_end = find_last_app();
+    uint8_t *app_start = app_end - app_size - sizeof(uint24_t);
+
+    dbg_printf("App from %p to %p\n", app_start, app_end);
+
+    if (!check_variable_overlaps(app_start))
+    {
+        return NO_SPACE;
+    }
+
+    if (!french)
+    {
+        os_PutStrFull("Installing app.");
+        os_NewLine();
+        os_PutStrFull("Please wait...");
+    }
+    else
+    {
+        os_PutStrFull("Installation de");
+        os_NewLine();
+        os_PutStrFull("l'application.");
+        os_NewLine();
+        os_PutStrFull("Veuillez patienter...");
+    }
+
+    void *written = app_end;
+    bool wrote_size = false;
+
+    for (uint8_t page = ADDR_TO_PAGE(app_end); page >= ADDR_TO_PAGE(app_start) && appvar >= &appvars[0]; page--)
+    {
+        while (written > PAGE_TO_ADDR(page) && appvar >= &appvars[0])
+        {
+            uint8_t *seg_start = app_start + appvar->app_offset;
+            uint8_t *dst_end = pmin(seg_start + appvar->size, PAGE_TO_ADDR(page + 1));
+            uint8_t *src_start = appvar->data;
+            uint8_t *dst_start = pmax(seg_start, PAGE_TO_ADDR(page));
+
+            src_start += dst_start - seg_start;
+
+            dbg_printf("Writing segment %u (%p-%p) %p-%p -> (page %02x) %p-%p\n",
+                appvar - appvars,
+                appvar->data,
+                appvar->data + appvar->size,
+                src_start,
+                src_start + (dst_end - dst_start),
+                page,
+                dst_start,
+                dst_end);
+
+            if (!wrote_size)
+            {
+                flash_write(dst_start, src_start, (dst_end - dst_start) - sizeof(uint24_t));
+                flash_write(dst_end - sizeof(uint24_t), &app_size, sizeof(uint24_t));
+                wrote_size = true;
+            }
+            else
+            {
+                flash_write(dst_start, src_start, (dst_end - dst_start));
+            }
+
+            dbg_printf("Written\n");
+
+            written = dst_start;
+            if (dst_start == seg_start)
+            {
+                appvar--;
+            }
+        }
+
+        dbg_printf("Erasing page %02x\n", page - 1);
+        flash_erase(page - 1);
+        dbg_printf("Erased\n");
+    }
+
+    dbg_printf("Copied app data\n");
+
+    fix_relocations(app_start);
+
+    dbg_printf("Fixed relocations");
+
+    return SUCCESS;
+}
+
+void delete_vars(void)
+{
+    for (uint8_t i = 0; i < MAX_APPVARS; ++i)
+    {
+        char name[10];
+
+        sprintf(name, APPVAR_PREFIX "%u", i);
+
+        if (os_ChkFindSym(OS_TYPE_APPVAR, name, NULL, NULL))
+        {
+            delete_var(name, OS_TYPE_APPVAR);
+        }
+        else
+        {
+            break;
+        }
+    }
+}
+
+int main(int argc, char **argv)
+{
+    const system_info_t *system_info = os_GetSystemInfo();
+
+    if (system_info->language == 0x10C)
+    {
+        french = true;
+    }
+
+    int error;
+
+    (void)argc;
+
+    os_ClrHome();
+
+    error = install();
+
+    os_ClrHome();
+
+    switch (error)
+    {
+        case SUCCESS:
+            if (!french)
+            {
+                os_PutStrFull("Successfully installed.");
+                os_NewLine();
+                os_NewLine();
+                os_PutStrFull("Delete installer files?");
+            }
+            else
+            {
+                os_PutStrFull("Install""\x96"" avec succ""\x97""s.");
+                os_NewLine();
+                os_NewLine();
+                os_PutStrFull("Supprimer l'installeur ?");
+            }
+
+            if (confirm_delete_vars())
+            {
+                delete_var(argv[0], OS_TYPE_PROT_PRGM);
+                delete_vars();
+            }
+            return SUCCESS;
+            break;
+
+        case ALREADY_INSTALLED:
+            if (!french)
+            {
+                os_PutStrFull("Already installed.");
+                os_NewLine();
+                os_PutStrFull("Delete app from the");
+                os_NewLine();
+                os_PutStrFull("mem menu to reinstall.");
+            }
+            else
+            {
+                os_PutStrFull("D""\x96""j""\x8F"" install""\x96"".");
+                os_NewLine();
+                os_PutStrFull("Supprimez l'appli depuis");
+                os_NewLine();
+                os_PutStrFull("le menu m""\x96""m pour");
+                os_NewLine();
+                os_PutStrFull("reinstaller.");
+            }
+            break;
+
+        case MISSING_VAR:
+            if (!french)
+            {
+                os_PutStrFull("Install failed.");
+                os_NewLine();
+                os_PutStrFull("Missing an appvar.");
+            }
+            else
+            {
+                os_PutStrFull("Echec de l'installation.");
+                os_NewLine();
+                os_PutStrFull("Appvar manquante.");
+            }
+            break;
+
+        case PORT_SETUP_FAILED:
+            if (!french)
+            {
+                os_PutStrFull("Install failed.");
+                os_NewLine();
+                os_PutStrFull("Unsupported OS version.");
+            }
+            else
+            {
+                os_PutStrFull("Echec de l'installation.");
+                os_NewLine();
+                os_PutStrFull("Version de l'OS");
+                os_NewLine();
+                os_PutStrFull("incompatible.");
+            }
+            break;
+
+        case NO_SPACE:
+            if (!french)
+            {
+                os_PutStrFull("Install failed.");
+                os_NewLine();
+                os_PutStrFull("Out of archive space.");
+                os_NewLine();
+                os_PutStrFull("Try running the");
+                os_NewLine();
+                os_PutStrFull("GarbageCollect command.");
+            }
+            else
+            {
+                os_PutStrFull("Echec de l'installation.");
+                os_NewLine();
+                os_PutStrFull("M""\x96""moire insuffisante.");
+                os_NewLine();
+                os_PutStrFull("Essayez de lancer la");
+                os_NewLine();
+                os_PutStrFull("commande \"RamasseMiettes\".");
+            }
+            break;
+    }
+
+    while (os_GetCSC());
+    while (!os_GetCSC());
+
+    return error;
 }

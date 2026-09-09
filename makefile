@@ -3,19 +3,20 @@
 # ----------------------------
 
 NAME = CEASHELL
-DESCRIPTION = "CEaShell Installer"
 ICON = icon.png
+DESCRIPTION = "CEaShell Installer"
 COMPRESSED = YES
 COMPRESSED_MODE = zx0
 ARCHIVED = YES
+LTO = NO
+HAS_PRINTF = NO
 
-CFLAGS = -Wall -Wextra -Oz
-CXXFLAGS = -Wall -Wextra -Oz
+APPVAR_PREFIX = "CEaSh"
+APPVAR_SPLIT_SIZE = 65200
+
+CFLAGS = -Wall -Wextra -Oz -DAPPVAR_PREFIX=\"$(APPVAR_PREFIX)\" -DAPPVAR_SPLIT_SIZE=$(APPVAR_SPLIT_SIZE)
+CXXFLAGS = -Wall -Wextra -Oz -DAPPVAR_PREFIX=\"$(APPVAR_PREFIX)\" -DAPPVAR_SPLIT_SIZE=$(APPVAR_SPLIT_SIZE)
 
 # ----------------------------
 
 include $(shell cedev-config --makefile)
-
-installer:
-	@make
-	@convbin -i bin/CEASHELL.8xp -o bin/installer.bin -j 8x -k bin
